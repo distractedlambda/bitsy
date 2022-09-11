@@ -118,7 +118,7 @@ impl Op {
 
             1 => {
                 let rn = OpId(rng.gen_range(0..num_existing_ops));
-                match rng.gen_range(0..=3) {
+                match rng.gen_range(0..=5) {
                     0 => Case::AddImmediate(
                         rn,
                         if rng.gen() {
@@ -138,6 +138,10 @@ impl Op {
                         lsb..(lsb + width)
                     }),
 
+                    4 => Case::BicImmediate(rn, random_modified_thumb_immediate(rng)),
+
+                    5 => Case::Clz(rn),
+
                     _ => unreachable!(),
                 }
             }
@@ -145,12 +149,20 @@ impl Op {
             2 => {
                 let rn = OpId(rng.gen_range(0..num_existing_ops));
                 let rm = OpId(rng.gen_range(0..num_existing_ops));
-                match rng.gen_range(0..=2) {
+                match rng.gen_range(0..=4) {
                     0 => Case::AddRegister(rn, rm, rng.gen()),
 
                     1 => Case::AndRegister(rn, rm, rng.gen()),
 
                     2 => Case::AsrRegister(rn, rm),
+
+                    3 => Case::Bfi(rn, rm, {
+                        let lsb = rng.gen_range(0..=31);
+                        let width = rng.gen_range(1..=(32 - lsb));
+                        lsb..(lsb + width)
+                    }),
+
+                    4 => Case::BicRegister(rn, rm, rng.gen()),
 
                     _ => unreachable!(),
                 }
@@ -244,6 +256,46 @@ impl Op {
                     << range.start);
                 for i in 0..dst.len() {
                     unsafe { *dst.get_unchecked_mut(i) = rn.get_unchecked(i) & mask }
+                }
+            }
+
+            Case::Bfi(OpId(rd), OpId(rn), ref range) => {
+                let rd = &srcs[rd];
+                let rn = &srcs[rn];
+                let src_mask =
+                    (1u32.wrapping_shl((range.end - range.start) as u32)).wrapping_sub(1);
+                let dst_mask = !(src_mask << range.start);
+                for i in 0..dst.len() {
+                    unsafe {
+                        *dst.get_unchecked_mut(i) = (rd.get_unchecked(i) & dst_mask)
+                            | (rn.get_unchecked(i) & src_mask).unchecked_shl(range.start.into())
+                    }
+                }
+            }
+
+            Case::BicImmediate(OpId(rn), imm) => {
+                let rn = &srcs[rn];
+                for i in 0..dst.len() {
+                    unsafe { *dst.get_unchecked_mut(i) = rn.get_unchecked(i) & !imm }
+                }
+            }
+
+            Case::BicRegister(OpId(rn), OpId(rm), shift) => {
+                let rn = &srcs[rn];
+                let rm = &srcs[rm];
+                shift.apply(dst, rm);
+                for i in 0..dst.len() {
+                    unsafe {
+                        let dst = dst.get_unchecked_mut(i);
+                        *dst = rn.get_unchecked(i) & !*dst;
+                    }
+                }
+            }
+
+            Case::Clz(OpId(rn)) => {
+                let rn = &srcs[rn];
+                for i in 0..dst.len() {
+                    unsafe { *dst.get_unchecked_mut(i) = rn.get_unchecked(i).leading_zeros() }
                 }
             }
 
