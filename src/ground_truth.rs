@@ -30,11 +30,7 @@ fn norm_to_u8(v: f64) -> u8 {
     (v * 255.0).clamp(0.0, 255.0) as u8
 }
 
-pub fn compute_ground_truth<const LANES: usize>(
-    result: &mut [u32],
-    blend_src: &[u32],
-    blend_dst: &[u32],
-) {
+pub fn compute_ground_truth(result: &mut [u32], blend_src: &[u32], blend_dst: &[u32]) {
     assert_eq!(result.len(), blend_src.len());
     assert_eq!(blend_src.len(), blend_dst.len());
     for i in 0..result.len() {

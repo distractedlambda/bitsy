@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ops::{Deref, Range};
 
 use rand::Rng;
 
@@ -155,7 +155,7 @@ impl Op {
         })
     }
 
-    pub fn evaluate<const LANES: usize>(&self, dst: &mut [u32], srcs: &[Box<[u32]>]) {
+    pub fn evaluate(&self, dst: &mut [u32], srcs: &[impl Deref<Target = [u32]>]) {
         for src in srcs {
             assert_eq!(dst.len(), src.len())
         }
