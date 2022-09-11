@@ -1,5 +1,9 @@
 #![feature(unchecked_math)]
 #![feature(array_zip)]
+#![feature(new_uninit)]
+#![feature(get_mut_unchecked)]
+
+use std::rc::Rc;
 
 use rand::{thread_rng, Rng};
 
@@ -12,51 +16,44 @@ mod ground_truth;
 mod immediate_shift;
 mod op;
 
-struct ReferenceData(Box<[u32]>);
-
-impl ReferenceData {
-    fn generate(rng: &mut impl Rng, n_samples: usize) -> Self {
-        let mut data = Vec::new();
-        data.resize(n_samples * 3, 0);
-        let mut data = data.into_boxed_slice();
-
-        for sample in 0..n_samples {
-            data[sample] = rng.gen();
-            data[n_samples + sample] = rng.gen();
-        }
-
-        let (inputs, ground_truth) = data.split_at_mut(n_samples * 2);
-        compute_ground_truth(ground_truth, &inputs[..n_samples], &inputs[n_samples..]);
-
-        Self(data)
-    }
-
-    fn blend_src(&self) -> &[u32] {
-        &self.0[..self.0.len() / 3]
-    }
-
-    fn blend_dst(&self) -> &[u32] {
-        &self.0[(self.0.len() / 3)..(2 * (self.0.len() / 3))]
-    }
-
-    fn blend_res(&self) -> &[u32] {
-        &self.0[(2 * (self.0.len() / 3))..]
-    }
+fn create_batch(batch_size: usize, f: impl FnOnce(&mut [u32])) -> Rc<[u32]> {
+    // FIXME: need a different way to alloc uninitialized memory
+    let mut batch = unsafe { Rc::new_uninit_slice(batch_size).assume_init() };
+    unsafe { f(Rc::get_mut_unchecked(&mut batch)) };
+    batch
 }
 
 fn main() {
     let batch_size = 256;
-    let n_batches = 1;
-    let max_ops = 8;
+    let n_batches = 64;
+    let max_ops = 16;
 
     let mut rng = thread_rng();
-    let reference_data = ReferenceData::generate(&mut rng, n_batches * batch_size);
+
+    let mut blend_src_batches = Vec::new();
+    blend_src_batches.resize_with(n_batches, || {
+        create_batch(batch_size, |dst| dst.fill_with(|| rng.gen()))
+    });
+
+    let mut blend_dst_batches = Vec::new();
+    blend_dst_batches.resize_with(n_batches, || {
+        create_batch(batch_size, |dst| dst.fill_with(|| rng.gen()))
+    });
+
+    let mut truth_batches = Vec::new();
+    for i in 0..n_batches {
+        truth_batches.push(create_batch(batch_size, |dst| {
+            compute_ground_truth(dst, &blend_src_batches[i], &blend_dst_batches[i])
+        }))
+    }
 
     let mut best_loss = u64::MAX;
+    let mut op_data = Vec::new();
+    let mut ops = Vec::new();
 
     loop {
-        let mut op_data = Vec::new();
-        let mut ops = Vec::new();
+        op_data.clear();
+        ops.clear();
 
         let n_ops = rng.gen_range(1..=max_ops);
         for i in 0..n_ops {
@@ -66,25 +63,16 @@ fn main() {
         let mut loss = 0;
 
         for i in 0..n_batches {
-            op_data.push(Vec::from(
-                &reference_data.blend_src()[(i * batch_size)..((i + 1) * batch_size)],
-            ));
-
-            op_data.push(Vec::from(
-                &reference_data.blend_dst()[(i * batch_size)..((i + 1) * batch_size)],
-            ));
+            op_data.push(blend_src_batches[i].clone());
+            op_data.push(blend_dst_batches[i].clone());
 
             for op in &ops {
-                let mut op_result = Vec::new();
-                op_result.resize(batch_size, 0);
-                op.evaluate(&mut op_result, &op_data);
-                op_data.push(op_result);
+                let op_result = create_batch(batch_size, |dst| op.evaluate(dst, &op_data));
+
+                op_data.push(op_result)
             }
 
-            loss += total_loss(
-                &reference_data.blend_res()[(i * batch_size)..((i + 1) * batch_size)],
-                &op_data.last().unwrap(),
-            );
+            loss += total_loss(&truth_batches[i], &op_data.last().unwrap());
         }
 
         if loss < best_loss {
