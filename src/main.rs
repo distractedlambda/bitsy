@@ -8,6 +8,7 @@ use std::rc::Rc;
 use rand::{thread_rng, Rng};
 
 use crate::{
+    decider::Decider,
     ground_truth::{compute_ground_truth, total_loss},
     op::Op,
 };
@@ -25,9 +26,8 @@ fn create_batch(batch_size: usize, f: impl FnOnce(&mut [u32])) -> Rc<[u32]> {
 }
 
 fn main() {
-    let batch_size = 512;
-    let n_batches = 1;
-    let max_ops = 8;
+    let batch_size = 64;
+    let n_batches = 64;
 
     let mut rng = thread_rng();
 
@@ -51,25 +51,25 @@ fn main() {
     let mut best_loss = u64::MAX;
     let mut op_data = Vec::new();
     let mut ops = Vec::new();
+    let mut decider = Decider::new(rng);
 
     loop {
-        op_data.clear();
         ops.clear();
 
-        let n_ops = rng.gen_range(1..=max_ops);
-        for i in 0..n_ops {
-            ops.push(Op::random(&mut rng, i + 2))
+        while !decider.new_ground() {
+            ops.push(Op::new(&mut decider, ops.len() + 2))
         }
 
         let mut loss = 0;
 
         for i in 0..n_batches {
+            op_data.clear();
+
             op_data.push(blend_src_batches[i].clone());
             op_data.push(blend_dst_batches[i].clone());
 
             for op in &ops {
                 let op_result = create_batch(batch_size, |dst| op.evaluate(dst, &op_data));
-
                 op_data.push(op_result)
             }
 
@@ -84,5 +84,7 @@ fn main() {
                 ops
             )
         }
+
+        decider.restart(loss);
     }
 }

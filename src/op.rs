@@ -2,7 +2,7 @@ use std::ops::{Deref, Range};
 
 use rand::Rng;
 
-use crate::immediate_shift::ImmediateShift;
+use crate::{decider::Decider, immediate_shift::ImmediateShift};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Op(Case);
@@ -100,45 +100,45 @@ enum Case {
 }
 
 impl Op {
-    pub fn random(rng: &mut impl Rng, num_existing_ops: usize) -> Self {
-        Self(match rng.gen_range(0..=3) {
-            0 => match rng.gen_range(0..=2) {
-                0 => Case::LdrConstant(rng.gen()),
+    pub fn new<R: Rng>(decider: &mut Decider<R>, num_existing_ops: usize) -> Self {
+        Self(match decider.decide_range(0..=3) {
+            0 => match decider.decide_range(0..=2) {
+                0 => Case::LdrConstant(decider.decide_range(0..=u32::MAX)),
 
-                1 => Case::MovImmediate(if rng.gen() {
-                    rng.gen_range(0..=65535)
+                1 => Case::MovImmediate(if decider.decide() {
+                    decider.decide_range(0..=65535)
                 } else {
-                    random_modified_thumb_immediate(rng)
+                    decide_modified_thumb_immediate(decider)
                 }),
 
-                2 => Case::MvnImmediate(random_modified_thumb_immediate(rng)),
+                2 => Case::MvnImmediate(decide_modified_thumb_immediate(decider)),
 
                 _ => unreachable!(),
             },
 
             1 => {
-                let rn = OpId(rng.gen_range(0..num_existing_ops));
-                match rng.gen_range(0..=5) {
+                let rn = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
+                match decider.decide_range(0..=5) {
                     0 => Case::AddImmediate(
                         rn,
-                        if rng.gen() {
-                            rng.gen_range(0..=4095)
+                        if decider.decide() {
+                            decider.decide_range(0..=4095)
                         } else {
-                            random_modified_thumb_immediate(rng)
+                            decide_modified_thumb_immediate(decider)
                         },
                     ),
 
-                    1 => Case::AndImmediate(rn, random_modified_thumb_immediate(rng)),
+                    1 => Case::AndImmediate(rn, decide_modified_thumb_immediate(decider)),
 
-                    2 => Case::AsrImmediate(rn, rng.gen_range(1..=31)),
+                    2 => Case::AsrImmediate(rn, decider.decide_range(1..=31)),
 
                     3 => Case::Bfc(rn, {
-                        let lsb = rng.gen_range(0..=31);
-                        let width = rng.gen_range(1..=(32 - lsb));
+                        let lsb = decider.decide_range(0..=31);
+                        let width = decider.decide_range(1..=(32 - lsb));
                         lsb..(lsb + width)
                     }),
 
-                    4 => Case::BicImmediate(rn, random_modified_thumb_immediate(rng)),
+                    4 => Case::BicImmediate(rn, decide_modified_thumb_immediate(decider)),
 
                     5 => Case::Clz(rn),
 
@@ -147,32 +147,32 @@ impl Op {
             }
 
             2 => {
-                let rn = OpId(rng.gen_range(0..num_existing_ops));
-                let rm = OpId(rng.gen_range(0..num_existing_ops));
-                match rng.gen_range(0..=4) {
-                    0 => Case::AddRegister(rn, rm, rng.gen()),
+                let rn = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
+                let rm = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
+                match decider.decide_range(0..=4) {
+                    0 => Case::AddRegister(rn, rm, ImmediateShift::new(decider)),
 
-                    1 => Case::AndRegister(rn, rm, rng.gen()),
+                    1 => Case::AndRegister(rn, rm, ImmediateShift::new(decider)),
 
                     2 => Case::AsrRegister(rn, rm),
 
                     3 => Case::Bfi(rn, rm, {
-                        let lsb = rng.gen_range(0..=31);
-                        let width = rng.gen_range(1..=(32 - lsb));
+                        let lsb = decider.decide_range(0..=31);
+                        let width = decider.decide_range(1..=(32 - lsb));
                         lsb..(lsb + width)
                     }),
 
-                    4 => Case::BicRegister(rn, rm, rng.gen()),
+                    4 => Case::BicRegister(rn, rm, ImmediateShift::new(decider)),
 
                     _ => unreachable!(),
                 }
             }
 
             3 => {
-                let rn = OpId(rng.gen_range(0..num_existing_ops));
-                let rm = OpId(rng.gen_range(0..num_existing_ops));
-                let ra = OpId(rng.gen_range(0..num_existing_ops));
-                match rng.gen_range(0..=0) {
+                let rn = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
+                let rm = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
+                let ra = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
+                match decider.decide_range(0..=0) {
                     0 => Case::Mla(rn, rm, ra),
                     _ => unreachable!(),
                 }
@@ -324,14 +324,14 @@ impl Op {
     }
 }
 
-fn random_modified_thumb_immediate(rng: &mut impl Rng) -> u32 {
-    let abcdefgh = rng.gen_range(0..=255);
-    match rng.gen_range(0..=4) {
+fn decide_modified_thumb_immediate<R: Rng>(decider: &mut Decider<R>) -> u32 {
+    let abcdefgh = decider.decide_range(0..=255);
+    match decider.decide_range(0..=4) {
         0 => abcdefgh,
         1 => (abcdefgh << 16) | abcdefgh,
         2 => (abcdefgh << 24) | (abcdefgh << 8),
         3 => (abcdefgh << 24) | (abcdefgh << 16) | (abcdefgh << 8) | abcdefgh,
-        4 => (abcdefgh | 0x80) << rng.gen_range(1..=24),
+        4 => (abcdefgh | 0x80) << decider.decide_range(1..=24),
         _ => unreachable!(),
     }
 }

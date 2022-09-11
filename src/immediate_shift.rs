@@ -1,7 +1,6 @@
-use rand::{
-    distributions::{Distribution, Standard},
-    Rng,
-};
+use rand::Rng;
+
+use crate::decider::Decider;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImmediateShift(Case);
@@ -15,26 +14,18 @@ enum Case {
     Ror(u8),
 }
 
-impl Default for ImmediateShift {
-    fn default() -> Self {
-        Self(Case::None)
-    }
-}
-
-impl Distribution<ImmediateShift> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ImmediateShift {
-        ImmediateShift(match rng.gen_range(0..5) {
+impl ImmediateShift {
+    pub fn new<R: Rng>(decider: &mut Decider<R>) -> Self {
+        ImmediateShift(match decider.decide_range(0..=4) {
             0 => Case::None,
-            1 => Case::Lsl(rng.gen_range(0..31)),
-            2 => Case::Lsr(rng.gen_range(0..31)),
-            3 => Case::Asr(rng.gen_range(0..31)),
-            4 => Case::Ror(rng.gen_range(0..31)),
+            1 => Case::Lsl(decider.decide_range(1..=31)),
+            2 => Case::Lsr(decider.decide_range(1..=31)),
+            3 => Case::Asr(decider.decide_range(1..=31)),
+            4 => Case::Ror(decider.decide_range(1..=31)),
             _ => unreachable!(),
         })
     }
-}
 
-impl ImmediateShift {
     pub fn apply(self, dst: &mut [u32], src: &[u32]) {
         assert_eq!(src.len(), dst.len());
         match self.0 {

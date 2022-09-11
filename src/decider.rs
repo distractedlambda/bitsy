@@ -1,7 +1,6 @@
-use std::{ptr::NonNull};
-use std::ops::Range;
-use num::Integer;
+use std::{fmt::Debug, ops::RangeInclusive, ptr::NonNull};
 
+use num::PrimInt;
 use rand::Rng;
 
 pub struct Decider<R> {
@@ -117,7 +116,24 @@ impl<R: Rng> Decider<R> {
         }
     }
 
-    pub fn decide_range<I: Integer>(range: Range<I>) -> I {
+    pub fn decide_range<I: PrimInt + Debug>(&mut self, range: RangeInclusive<I>) -> I {
+        debug_assert!(range.start() <= range.end());
 
+        let mut range = range;
+
+        while range.start() != range.end() {
+            let half = (range
+                .end()
+                .saturating_sub(*range.start())
+                .saturating_add(I::one()))
+                >> 1;
+            if self.decide() {
+                range = (*range.start() + half)..=*range.end();
+            } else {
+                range = *range.start()..=(*range.end() - half);
+            }
+        }
+
+        *range.start()
     }
 }
