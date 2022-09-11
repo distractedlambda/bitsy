@@ -12,6 +12,7 @@ use crate::{
     op::Op,
 };
 
+mod decider;
 mod ground_truth;
 mod immediate_shift;
 mod op;

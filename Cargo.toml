@@ -7,8 +7,11 @@ edition = "2021"
 version = "0.8.5"
 features = ["nightly"]
 
-[profile.release]
+[dependencies.num]
+version = "0.4.0"
+
+[profile.dev]
 opt-level = 3
-overflow-checks = false
+overflow-checks = true
 lto = "fat"
 codegen-units = 1
