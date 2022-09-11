@@ -24,9 +24,9 @@ fn create_batch(batch_size: usize, f: impl FnOnce(&mut [u32])) -> Rc<[u32]> {
 }
 
 fn main() {
-    let batch_size = 256;
-    let n_batches = 64;
-    let max_ops = 16;
+    let batch_size = 512;
+    let n_batches = 1;
+    let max_ops = 8;
 
     let mut rng = thread_rng();
 

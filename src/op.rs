@@ -118,7 +118,7 @@ impl Op {
 
             1 => {
                 let rn = OpId(rng.gen_range(0..num_existing_ops));
-                match rng.gen_range(0..=0) {
+                match rng.gen_range(0..=3) {
                     0 => Case::AddImmediate(
                         rn,
                         if rng.gen() {
@@ -128,6 +128,16 @@ impl Op {
                         },
                     ),
 
+                    1 => Case::AndImmediate(rn, random_modified_thumb_immediate(rng)),
+
+                    2 => Case::AsrImmediate(rn, rng.gen_range(1..=31)),
+
+                    3 => Case::Bfc(rn, {
+                        let lsb = rng.gen_range(0..=31);
+                        let width = rng.gen_range(1..=(32 - lsb));
+                        lsb..(lsb + width)
+                    }),
+
                     _ => unreachable!(),
                 }
             }
@@ -135,8 +145,13 @@ impl Op {
             2 => {
                 let rn = OpId(rng.gen_range(0..num_existing_ops));
                 let rm = OpId(rng.gen_range(0..num_existing_ops));
-                match rng.gen_range(0..=0) {
+                match rng.gen_range(0..=2) {
                     0 => Case::AddRegister(rn, rm, rng.gen()),
+
+                    1 => Case::AndRegister(rn, rm, rng.gen()),
+
+                    2 => Case::AsrRegister(rn, rm),
+
                     _ => unreachable!(),
                 }
             }
@@ -177,6 +192,58 @@ impl Op {
                         let dst = dst.get_unchecked_mut(i);
                         *dst = dst.wrapping_add(*rn.get_unchecked(i));
                     }
+                }
+            }
+
+            Case::AndImmediate(OpId(rn), imm) => {
+                let rn = &srcs[rn];
+                for i in 0..dst.len() {
+                    unsafe { *dst.get_unchecked_mut(i) = rn.get_unchecked(i) & imm }
+                }
+            }
+
+            Case::AndRegister(OpId(rn), OpId(rm), shift) => {
+                let rn = &srcs[rn];
+                let rm = &srcs[rm];
+                shift.apply(dst, rm);
+                for i in 0..dst.len() {
+                    unsafe {
+                        *dst.get_unchecked_mut(i) &= rn.get_unchecked(i);
+                    }
+                }
+            }
+
+            Case::AsrImmediate(OpId(rn), imm) => {
+                let rn = &srcs[rn];
+                for i in 0..dst.len() {
+                    unsafe {
+                        *dst.get_unchecked_mut(i) =
+                            (*rn.get_unchecked(i) as i32).unchecked_shr(imm.into()) as u32
+                    }
+                }
+            }
+
+            Case::AsrRegister(OpId(rn), OpId(rm)) => {
+                let rn = &srcs[rn];
+                let rm = &srcs[rm];
+                for i in 0..dst.len() {
+                    unsafe {
+                        let shift = (*rm.get_unchecked(i) as i32) & 0xff;
+                        *dst.get_unchecked_mut(i) = if shift >= 32 {
+                            0
+                        } else {
+                            (*rn.get_unchecked(i) as i32).unchecked_shr(shift) as u32
+                        }
+                    }
+                }
+            }
+
+            Case::Bfc(OpId(rn), ref range) => {
+                let rn = &srcs[rn];
+                let mask = !((1u32.wrapping_shl((range.end - range.start) as u32)).wrapping_sub(1)
+                    << range.start);
+                for i in 0..dst.len() {
+                    unsafe { *dst.get_unchecked_mut(i) = rn.get_unchecked(i) & mask }
                 }
             }
 
