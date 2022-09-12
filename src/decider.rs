@@ -65,10 +65,6 @@ impl<R: Rng> Decider<R> {
         }
     }
 
-    pub fn new_ground(&self) -> bool {
-        unsafe { self.current_node.as_ref().min_loss == u64::MAX }
-    }
-
     pub fn restart(&mut self, loss: u64) {
         unsafe {
             self.current_node.as_mut().min_loss = loss;
