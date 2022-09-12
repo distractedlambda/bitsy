@@ -118,7 +118,7 @@ impl Op {
 
             1 => {
                 let rn = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
-                match decider.decide_range(0..=5) {
+                match decider.decide_range(0..=7) {
                     0 => Case::AddImmediate(
                         rn,
                         if decider.decide() {
@@ -142,6 +142,10 @@ impl Op {
 
                     5 => Case::Clz(rn),
 
+                    6 => Case::EorImmediate(rn, decide_modified_thumb_immediate(decider)),
+
+                    7 => Case::LslImmediate(rn, decider.decide_range(1..=31)),
+
                     _ => unreachable!(),
                 }
             }
@@ -149,7 +153,7 @@ impl Op {
             2 => {
                 let rn = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
                 let rm = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
-                match decider.decide_range(0..=4) {
+                match decider.decide_range(0..=6) {
                     0 => Case::AddRegister(rn, rm, ImmediateShift::new(decider)),
 
                     1 => Case::AndRegister(rn, rm, ImmediateShift::new(decider)),
@@ -163,6 +167,10 @@ impl Op {
                     }),
 
                     4 => Case::BicRegister(rn, rm, ImmediateShift::new(decider)),
+
+                    5 => Case::EorRegister(rn, rm, ImmediateShift::new(decider)),
+
+                    6 => Case::LslRegister(rn, rm),
 
                     _ => unreachable!(),
                 }
@@ -299,7 +307,47 @@ impl Op {
                 }
             }
 
+            Case::EorImmediate(OpId(rn), imm) => {
+                let rn = &srcs[rn];
+                for i in 0..dst.len() {
+                    unsafe { *dst.get_unchecked_mut(i) = rn.get_unchecked(i) ^ imm };
+                }
+            }
+
+            Case::EorRegister(OpId(rn), OpId(rm), shift) => {
+                let rn = &srcs[rn];
+                let rm = &srcs[rm];
+                shift.apply(dst, rm);
+                for i in 0..dst.len() {
+                    unsafe { *dst.get_unchecked_mut(i) ^= rn.get_unchecked(i) }
+                }
+            }
+
             Case::LdrConstant(value) => dst.fill(value),
+
+            Case::LslImmediate(OpId(rn), amt) => {
+                let rn = &srcs[rn];
+                for i in 0..dst.len() {
+                    unsafe {
+                        *dst.get_unchecked_mut(i) = rn.get_unchecked(i).unchecked_shl(amt.into())
+                    }
+                }
+            }
+
+            Case::LslRegister(OpId(rn), OpId(rm)) => {
+                let rn = &srcs[rn];
+                let rm = &srcs[rm];
+                for i in 0..dst.len() {
+                    unsafe {
+                        let shift = *rm.get_unchecked(i) & 0xff;
+                        *dst.get_unchecked_mut(i) = if shift >= 32 {
+                            0
+                        } else {
+                            rn.get_unchecked(i).unchecked_shl(shift)
+                        }
+                    }
+                }
+            }
 
             Case::Mla(OpId(rn), OpId(rm), OpId(ra)) => {
                 let rn = &srcs[rn];

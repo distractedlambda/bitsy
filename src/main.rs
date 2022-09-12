@@ -26,8 +26,9 @@ fn create_batch(batch_size: usize, f: impl FnOnce(&mut [u32])) -> Rc<[u32]> {
 }
 
 fn main() {
+    let max_ops = 16;
     let batch_size = 64;
-    let n_batches = 64;
+    let n_batches = 1024;
 
     let mut rng = thread_rng();
 
@@ -56,7 +57,8 @@ fn main() {
     loop {
         ops.clear();
 
-        while !decider.new_ground() {
+        let n_ops = decider.decide_range(1..=max_ops);
+        for _ in 0..n_ops {
             ops.push(Op::new(&mut decider, ops.len() + 2))
         }
 
