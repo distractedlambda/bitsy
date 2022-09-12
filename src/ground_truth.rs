@@ -1,3 +1,5 @@
+use crate::batch::Batch;
+
 fn srgb_to_linear(c: f64) -> f64 {
     if c <= 0.04045 {
         c / 12.92
@@ -30,15 +32,14 @@ fn norm_to_u8(v: f64) -> u8 {
     (v * 255.0).clamp(0.0, 255.0) as u8
 }
 
-pub fn compute_ground_truth(result: &mut [u32], blend_src: &[u32], blend_dst: &[u32]) {
-    assert_eq!(result.len(), blend_src.len());
-    assert_eq!(blend_src.len(), blend_dst.len());
-    for i in 0..result.len() {
-        let &src = unsafe { blend_src.get_unchecked(i) };
-        let &dst = unsafe { blend_dst.get_unchecked(i) };
-
-        let [src_a, src_r, src_g, src_b] = split_argb(src);
-        let [dst_a, dst_r, dst_g, dst_b] = split_argb(dst);
+pub fn compute_ground_truth<const N: usize>(
+    result: &mut Batch<u32, N>,
+    blend_src: &Batch<u32, N>,
+    blend_dst: &Batch<u32, N>,
+) {
+    for i in 0..N {
+        let [src_a, src_r, src_g, src_b] = split_argb(blend_src[i]);
+        let [dst_a, dst_r, dst_g, dst_b] = split_argb(blend_dst[i]);
 
         let src_a_norm = u8_to_norm(src_a);
         let src_r_norm = u8_to_norm(src_r);
@@ -85,21 +86,15 @@ pub fn compute_ground_truth(result: &mut [u32], blend_src: &[u32], blend_dst: &[
     }
 }
 
-pub fn total_loss(truth: &[u32], prediction: &[u32]) -> u64 {
-    assert_eq!(truth.len(), prediction.len());
-
+pub fn total_loss<const N: usize>(truth: &Batch<u32, N>, prediction: &Batch<u32, N>) -> u64 {
     let mut total = 0;
 
-    for i in 0..truth.len() {
-        let &truth = unsafe { truth.get_unchecked(i) };
-        let &prediction = unsafe { prediction.get_unchecked(i) };
-        let truth_bytes: [u8; 4] = unsafe { std::mem::transmute(truth) };
-        let prediction_bytes: [u8; 4] = unsafe { std::mem::transmute(prediction) };
-        total += truth_bytes
-            .zip(prediction_bytes)
-            .map(|(t, p)| ((t as u16 as i16) - (p as u16 as i16)).abs() as u64)
-            .iter()
-            .sum::<u64>()
+    for i in 0..N {
+        let truth_bytes = truth[i].to_ne_bytes();
+        let prediction_bytes = prediction[i].to_ne_bytes();
+        for j in 0..4 {
+            total += truth_bytes[j].abs_diff(prediction_bytes[j]) as u64;
+        }
     }
 
     total
