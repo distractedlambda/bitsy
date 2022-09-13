@@ -15,10 +15,10 @@ mod decider;
 mod ground_truth;
 mod op;
 
-const BATCH_SIZE: usize = 32;
+const BATCH_SIZE: usize = 64;
 
 fn main() {
-    let max_ops = 16;
+    let max_ops = 4;
     let n_batches = 1024;
 
     let mut rng = thread_rng();
@@ -72,7 +72,7 @@ fn main() {
         if loss < best_loss {
             best_loss = loss;
             println!(
-                "New best, avg. loss = {}: {:?}",
+                "New best, avg. loss = {}: {:?}\n",
                 (loss as f64) / ((BATCH_SIZE * n_batches) as f64),
                 ops
             )
