@@ -1,20 +1,33 @@
-use std::{fmt::Debug, ops::RangeInclusive, ptr::NonNull};
+use std::{
+    ops::{Bound, RangeBounds},
+    ptr::NonNull,
+};
 
 use num::PrimInt;
 use rand::Rng;
 
-pub struct Decider<R> {
+pub trait Decider {
+    fn decide_bool(&mut self) -> bool;
+
+    fn decide_range<I: PrimInt>(&mut self, range: impl RangeBounds<I>) -> I;
+}
+
+pub trait Decide {
+    fn decide(decider: &mut impl Decider) -> Self;
+}
+
+pub struct TreeDecider<R> {
     rng: R,
     root_node: NonNull<Node>,
     current_node: NonNull<Node>,
     history: Vec<NonNull<Node>>,
 }
 
-unsafe impl<R: Send> Send for Decider<R> {}
+unsafe impl<R: Send> Send for TreeDecider<R> {}
 
-unsafe impl<R: Sync> Sync for Decider<R> {}
+unsafe impl<R: Sync> Sync for TreeDecider<R> {}
 
-impl<R> Drop for Decider<R> {
+impl<R> Drop for TreeDecider<R> {
     fn drop(&mut self) {
         unsafe {
             let _ = Box::from_raw(self.root_node.as_ptr());
@@ -52,7 +65,7 @@ impl Node {
     }
 }
 
-impl<R: Rng> Decider<R> {
+impl<R: Rng> TreeDecider<R> {
     pub fn new(rng: R) -> Self {
         let root_node = Box::new(Node::new());
         let root_node = Box::into_raw(root_node);
@@ -77,8 +90,10 @@ impl<R: Rng> Decider<R> {
             self.current_node = self.root_node;
         }
     }
+}
 
-    pub fn decide(&mut self) -> bool {
+impl<R: Rng> Decider for TreeDecider<R> {
+    fn decide_bool(&mut self) -> bool {
         self.history.push(self.current_node);
         unsafe {
             let node = self.current_node.as_mut();
@@ -112,24 +127,108 @@ impl<R: Rng> Decider<R> {
         }
     }
 
-    pub fn decide_range<I: PrimInt + Debug>(&mut self, range: RangeInclusive<I>) -> I {
-        debug_assert!(range.start() <= range.end());
+    fn decide_range<I: PrimInt>(&mut self, range: impl RangeBounds<I>) -> I {
+        let mut first = match range.start_bound() {
+            Bound::Included(&start) => start,
+            Bound::Excluded(&start) => start + I::one(),
+            Bound::Unbounded => I::min_value(),
+        };
 
-        let mut range = range;
+        let mut last = match range.end_bound() {
+            Bound::Included(&end) => end,
+            Bound::Excluded(&end) => end - I::one(),
+            Bound::Unbounded => I::max_value(),
+        };
 
-        while range.start() != range.end() {
-            let half = (range
-                .end()
-                .saturating_sub(*range.start())
-                .saturating_add(I::one()))
-                >> 1;
-            if self.decide() {
-                range = (*range.start() + half)..=*range.end();
+        debug_assert!(first <= last);
+
+        while first != last {
+            let half = (last.saturating_sub(first).saturating_add(I::one())) >> 1;
+            if self.decide_bool() {
+                first = first + half;
             } else {
-                range = *range.start()..=(*range.end() - half);
+                last = last - half;
             }
         }
 
-        *range.start()
+        first
+    }
+}
+
+impl Decide for bool {
+    fn decide(decider: &mut impl Decider) -> Self {
+        decider.decide_bool()
+    }
+}
+
+impl Decide for u8 {
+    fn decide(decider: &mut impl Decider) -> Self {
+        let mut result = 0;
+
+        for i in (0..Self::BITS).rev() {
+            result |= (decider.decide_bool() as Self) << i
+        }
+
+        result
+    }
+}
+
+impl Decide for u16 {
+    fn decide(decider: &mut impl Decider) -> Self {
+        let mut result = 0;
+
+        for i in (0..Self::BITS).rev() {
+            result |= (decider.decide_bool() as Self) << i
+        }
+
+        result
+    }
+}
+
+impl Decide for u32 {
+    fn decide(decider: &mut impl Decider) -> Self {
+        let mut result = 0;
+
+        for i in (0..Self::BITS).rev() {
+            result |= (decider.decide_bool() as Self) << i
+        }
+
+        result
+    }
+}
+
+impl Decide for u64 {
+    fn decide(decider: &mut impl Decider) -> Self {
+        let mut result = 0;
+
+        for i in (0..Self::BITS).rev() {
+            result |= (decider.decide_bool() as Self) << i
+        }
+
+        result
+    }
+}
+
+impl Decide for i8 {
+    fn decide(decider: &mut impl Decider) -> Self {
+        u8::decide(decider) as Self
+    }
+}
+
+impl Decide for i16 {
+    fn decide(decider: &mut impl Decider) -> Self {
+        u16::decide(decider) as Self
+    }
+}
+
+impl Decide for i32 {
+    fn decide(decider: &mut impl Decider) -> Self {
+        u32::decide(decider) as Self
+    }
+}
+
+impl Decide for i64 {
+    fn decide(decider: &mut impl Decider) -> Self {
+        u64::decide(decider) as Self
     }
 }

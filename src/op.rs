@@ -1,8 +1,7 @@
-use std::mem::{transmute, variant_count};
-
-use rand::Rng;
-
-use crate::{batch::Batch, decider::Decider};
+use crate::{
+    batch::Batch,
+    decider::{Decide, Decider},
+};
 
 #[derive(Copy, Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Op(Case);
@@ -12,226 +11,133 @@ struct OpId(usize);
 
 #[derive(Copy, Debug, PartialEq, Eq, Clone, Hash)]
 enum Case {
+    Add(OpId, OpId),
+    And(OpId, OpId),
+    AsrImm(OpId, u8),
     Constant(u32),
-    Unary(UnaryOpcode, OpId),
-    Binary(BinaryOpcode, OpId, OpId),
-}
-
-#[repr(usize)]
-#[allow(unused)]
-#[derive(Copy, Debug, PartialEq, Eq, Clone, Hash)]
-enum UnaryOpcode {
-    Clz,
-    Neg,
-    ByteReverse,
-    BitReverse,
-    BitwiseNeg,
-    Sext16,
-    Sext8,
-}
-
-#[repr(usize)]
-#[allow(unused)]
-#[derive(Copy, Debug, PartialEq, Eq, Clone, Hash)]
-enum BinaryOpcode {
-    Add,
-    And,
-    Asr,
-    Lsl,
-    Lsr,
-    Mul,
-    Or,
-    Xor,
-    Sub,
-    RotateRight,
-    UAdd8,
-    UAdd16,
-}
-
-impl UnaryOpcode {
-    fn decide<R: Rng>(decider: &mut Decider<R>) -> Self {
-        unsafe { transmute(decider.decide_range(0..=(variant_count::<Self>() - 1))) }
-    }
-}
-
-impl BinaryOpcode {
-    fn decide<R: Rng>(decider: &mut Decider<R>) -> Self {
-        unsafe { transmute(decider.decide_range(0..=(variant_count::<Self>() - 1))) }
-    }
+    LslImm(OpId, u8),
+    LsrImm(OpId, u8),
+    Mul(OpId, OpId),
+    Neg(OpId),
+    Not(OpId),
+    Or(OpId, OpId),
+    RorImm(OpId, u8),
+    Sub(OpId, OpId),
+    Xor(OpId, OpId),
 }
 
 impl Op {
-    pub fn new<R: Rng>(decider: &mut Decider<R>, num_existing_ops: usize) -> Self {
-        Self(
-            match decider.decide_range(0..=(variant_count::<Case>() - 1)) {
-                0 => Case::Constant(decider.decide_range(0..=u32::MAX)),
-
-                1 => {
-                    let opcode = UnaryOpcode::decide(decider);
-                    let operand = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
-                    Case::Unary(opcode, operand)
-                }
-
-                2 => {
-                    let opcode = BinaryOpcode::decide(decider);
-                    let lhs = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
-                    let rhs = OpId(decider.decide_range(0..=(num_existing_ops - 1)));
-                    Case::Binary(opcode, lhs, rhs)
-                }
-
-                _ => unreachable!(),
-            },
-        )
+    pub fn decide_additional<D: Decider>(decider: &mut D, num_existing_ops: usize) -> Self {
+        let pick_op = |decider: &mut D| OpId(decider.decide_range(0..num_existing_ops));
+        Op(match decider.decide_range(0..=12) {
+            0 => Case::Add(pick_op(decider), pick_op(decider)),
+            1 => Case::And(pick_op(decider), pick_op(decider)),
+            2 => Case::AsrImm(pick_op(decider), decider.decide_range(1..=31)),
+            3 => Case::Constant(Decide::decide(decider)),
+            4 => Case::LslImm(pick_op(decider), decider.decide_range(1..=31)),
+            5 => Case::LsrImm(pick_op(decider), decider.decide_range(1..=31)),
+            6 => Case::Mul(pick_op(decider), pick_op(decider)),
+            7 => Case::Neg(pick_op(decider)),
+            8 => Case::Not(pick_op(decider)),
+            9 => Case::Or(pick_op(decider), pick_op(decider)),
+            10 => Case::RorImm(pick_op(decider), decider.decide_range(1..=31)),
+            11 => Case::Sub(pick_op(decider), pick_op(decider)),
+            12 => Case::Xor(pick_op(decider), pick_op(decider)),
+            _ => unreachable!(),
+        })
     }
 
     pub fn evaluate<const N: usize>(&self, dst: &mut Batch<u32, N>, srcs: &[Batch<u32, N>]) {
         match self.0 {
-            Case::Constant(value) => dst.fill(value),
-
-            Case::Unary(opcode, OpId(operand)) => {
-                let operand = &srcs[operand];
-                match opcode {
-                    UnaryOpcode::Clz => {
-                        for i in 0..N {
-                            dst[i] = operand[i].leading_zeros()
-                        }
-                    }
-
-                    UnaryOpcode::Neg => {
-                        for i in 0..N {
-                            dst[i] = operand[i].wrapping_neg()
-                        }
-                    }
-
-                    UnaryOpcode::ByteReverse => {
-                        for i in 0..N {
-                            dst[i] = operand[i].swap_bytes()
-                        }
-                    }
-
-                    UnaryOpcode::BitReverse => {
-                        for i in 0..N {
-                            dst[i] = operand[i].reverse_bits()
-                        }
-                    }
-
-                    UnaryOpcode::BitwiseNeg => {
-                        for i in 0..N {
-                            dst[i] = !operand[i]
-                        }
-                    }
-
-                    UnaryOpcode::Sext16 => {
-                        for i in 0..N {
-                            dst[i] = operand[i] as u16 as i16 as i32 as u32
-                        }
-                    }
-
-                    UnaryOpcode::Sext8 => {
-                        for i in 0..N {
-                            dst[i] = operand[i] as u8 as i8 as i32 as u32
-                        }
-                    }
+            Case::Add(OpId(lhs), OpId(rhs)) => {
+                let lhs = &srcs[lhs];
+                let rhs = &srcs[rhs];
+                for i in 0..N {
+                    dst[i] = lhs[i].wrapping_add(rhs[i])
                 }
             }
 
-            Case::Binary(opcode, OpId(lhs), OpId(rhs)) => {
+            Case::And(OpId(lhs), OpId(rhs)) => {
                 let lhs = &srcs[lhs];
                 let rhs = &srcs[rhs];
-                match opcode {
-                    BinaryOpcode::Add => {
-                        for i in 0..N {
-                            dst[i] = lhs[i].wrapping_add(rhs[i]);
-                        }
-                    }
+                for i in 0..N {
+                    dst[i] = lhs[i] & rhs[i]
+                }
+            }
 
-                    BinaryOpcode::And => {
-                        for i in 0..N {
-                            dst[i] = lhs[i] & rhs[i];
-                        }
-                    }
+            Case::AsrImm(OpId(lhs), rhs) => {
+                let lhs = &srcs[lhs];
+                for i in 0..N {
+                    dst[i] = unsafe { (lhs[i] as i32).unchecked_shr(rhs as i32) as u32 }
+                }
+            }
 
-                    BinaryOpcode::Asr => {
-                        for i in 0..N {
-                            let shift = rhs[i] & 0xff;
-                            dst[i] = unsafe {
-                                // is this correct?
-                                (lhs[i] as i32).unchecked_shr((shift as i32).min(31)) as u32
-                            }
-                        }
-                    }
+            Case::Constant(value) => dst.fill(value),
 
-                    BinaryOpcode::Xor => {
-                        for i in 0..N {
-                            dst[i] = lhs[i] ^ rhs[i]
-                        }
-                    }
+            Case::LslImm(OpId(lhs), rhs) => {
+                let lhs = &srcs[lhs];
+                for i in 0..N {
+                    dst[i] = unsafe { lhs[i].unchecked_shl(rhs as u32) }
+                }
+            }
 
-                    BinaryOpcode::Lsl => {
-                        for i in 0..N {
-                            let shift = rhs[i] & 0xff;
-                            dst[i] = if shift >= 32 {
-                                0
-                            } else {
-                                unsafe { lhs[i].unchecked_shl(shift) }
-                            }
-                        }
-                    }
+            Case::LsrImm(OpId(lhs), rhs) => {
+                let lhs = &srcs[lhs];
+                for i in 0..N {
+                    dst[i] = unsafe { lhs[i].unchecked_shr(rhs as u32) }
+                }
+            }
 
-                    BinaryOpcode::Lsr => {
-                        for i in 0..N {
-                            let shift = rhs[i] & 0xff;
-                            dst[i] = if shift >= 32 {
-                                0
-                            } else {
-                                unsafe { lhs[i].unchecked_shr(shift) }
-                            }
-                        }
-                    }
+            Case::Mul(OpId(lhs), OpId(rhs)) => {
+                let lhs = &srcs[lhs];
+                let rhs = &srcs[rhs];
+                for i in 0..N {
+                    dst[i] = lhs[i].wrapping_mul(rhs[i])
+                }
+            }
 
-                    BinaryOpcode::Mul => {
-                        for i in 0..N {
-                            dst[i] = lhs[i].wrapping_mul(rhs[i])
-                        }
-                    }
+            Case::Neg(OpId(operand)) => {
+                let operand = &srcs[operand];
+                for i in 0..N {
+                    dst[i] = operand[i].wrapping_neg();
+                }
+            }
 
-                    BinaryOpcode::Or => {
-                        for i in 0..N {
-                            dst[i] = lhs[i] | rhs[i]
-                        }
-                    }
+            Case::Not(OpId(operand)) => {
+                let operand = &srcs[operand];
+                for i in 0..N {
+                    dst[i] = !operand[i];
+                }
+            }
 
-                    BinaryOpcode::Sub => {
-                        for i in 0..N {
-                            dst[i] = lhs[i].wrapping_sub(rhs[i])
-                        }
-                    }
+            Case::Or(OpId(lhs), OpId(rhs)) => {
+                let lhs = &srcs[lhs];
+                let rhs = &srcs[rhs];
+                for i in 0..N {
+                    dst[i] = lhs[i] | rhs[i]
+                }
+            }
 
-                    BinaryOpcode::RotateRight => {
-                        for i in 0..N {
-                            dst[i] = lhs[i].rotate_right(rhs[i])
-                        }
-                    }
+            Case::RorImm(OpId(lhs), rhs) => {
+                let lhs = &srcs[lhs];
+                for i in 0..N {
+                    dst[i] = lhs[i].rotate_right(rhs as u32)
+                }
+            }
 
-                    BinaryOpcode::UAdd8 => {
-                        for i in 0..N {
-                            let lhs_bytes = lhs[i].to_ne_bytes();
-                            let rhs_bytes = rhs[i].to_ne_bytes();
-                            dst[i] = u32::from_ne_bytes([
-                                lhs_bytes[0].wrapping_add(rhs_bytes[0]),
-                                lhs_bytes[1].wrapping_add(rhs_bytes[1]),
-                                lhs_bytes[2].wrapping_add(rhs_bytes[2]),
-                                lhs_bytes[3].wrapping_add(rhs_bytes[3]),
-                            ])
-                        }
-                    }
+            Case::Sub(OpId(lhs), OpId(rhs)) => {
+                let lhs = &srcs[lhs];
+                let rhs = &srcs[rhs];
+                for i in 0..N {
+                    dst[i] = lhs[i].wrapping_sub(rhs[i])
+                }
+            }
 
-                    BinaryOpcode::UAdd16 => {
-                        for i in 0..N {
-                            dst[i] = (((lhs[i] & 0xff_ff) + (rhs[i] & 0xff_ff)) & 0xff_ff)
-                                | (((lhs[i] >> 16) + (rhs[i] >> 16)) << 16)
-                        }
-                    }
+            Case::Xor(OpId(lhs), OpId(rhs)) => {
+                let lhs = &srcs[lhs];
+                let rhs = &srcs[rhs];
+                for i in 0..N {
+                    dst[i] = lhs[i] ^ rhs[i]
                 }
             }
         }

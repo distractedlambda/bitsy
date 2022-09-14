@@ -3,13 +3,16 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use rand::{prelude::Distribution, distributions::Standard};
+use rand::{distributions::Standard, prelude::Distribution};
 
 #[repr(align(32))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Batch<T, const N: usize>([T; N]);
 
-impl<T, const N: usize> Distribution<Batch<T, N>> for Standard where Standard: Distribution<[T; N]> {
+impl<T, const N: usize> Distribution<Batch<T, N>> for Standard
+where
+    Standard: Distribution<[T; N]>,
+{
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Batch<T, N> {
         Batch(rng.gen())
     }

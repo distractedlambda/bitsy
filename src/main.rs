@@ -2,6 +2,7 @@
 #![feature(variant_count)]
 
 use batch::Batch;
+use decider::TreeDecider;
 use rand::{thread_rng, Rng};
 
 use crate::{
@@ -18,7 +19,7 @@ mod op;
 const BATCH_SIZE: usize = 64;
 
 fn main() {
-    let max_ops = 4;
+    let max_ops = 8;
     let n_batches = 1024;
 
     let mut rng = thread_rng();
@@ -42,14 +43,14 @@ fn main() {
     let mut best_loss = u64::MAX;
     let mut op_data = Vec::new();
     let mut ops = Vec::new();
-    let mut decider = Decider::new(rng);
+    let mut decider = TreeDecider::new(rng);
 
     loop {
         ops.clear();
 
         let n_ops = decider.decide_range(1..=max_ops);
         for _ in 0..n_ops {
-            ops.push(Op::new(&mut decider, ops.len() + 2))
+            ops.push(Op::decide_additional(&mut decider, ops.len() + 2))
         }
 
         let mut loss = 0;

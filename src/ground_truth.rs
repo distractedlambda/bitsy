@@ -82,7 +82,7 @@ pub fn compute_ground_truth<const N: usize>(
             | ((res_g_u8 as u32) << 8)
             | (res_b_u8 as u32);
 
-        unsafe { *result.get_unchecked_mut(i) = res_argb }
+        result[i] = res_argb;
     }
 }
 
